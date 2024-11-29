@@ -19,7 +19,6 @@ Above command will update .env file
 ```env
 BROADCAST_CONNECTION=reverb
 
-
 REVERB_APP_ID=151212
 
 REVERB_APP_KEY=1rcztnsuiavyzgsomsms
