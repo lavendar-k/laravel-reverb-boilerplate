@@ -7,60 +7,254 @@
 <a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
 </p>
 
-## About Laravel
+## Laravel Reverb
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+### Run this commands
+```cmd
+php artisan install:broadcasting
+```
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+Above command will update .env file
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+```env
+BROADCAST_CONNECTION=reverb
 
-## Learning Laravel
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+REVERB_APP_ID=151212
 
-You may also try the [Laravel Bootcamp](https://bootcamp.laravel.com), where you will be guided through building a modern Laravel application from scratch.
+REVERB_APP_KEY=1rcztnsuiavyzgsomsms
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+REVERB_APP_SECRET=uezrgv668uyajdrlq69x
 
-## Laravel Sponsors
+REVERB_HOST="localhost"
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+REVERB_PORT=8080
 
-### Premium Partners
+REVERB_SCHEME=http
 
-- **[Vehikl](https://vehikl.com/)**
-- **[Tighten Co.](https://tighten.co)**
-- **[WebReinvent](https://webreinvent.com/)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel/)**
-- **[Cyber-Duck](https://cyber-duck.co.uk)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Jump24](https://jump24.co.uk)**
-- **[Redberry](https://redberry.international/laravel/)**
-- **[Active Logic](https://activelogic.com)**
-- **[byte5](https://byte5.de)**
-- **[OP.GG](https://op.gg)**
 
-## Contributing
+VITE_REVERB_APP_KEY="${REVERB_APP_KEY}"
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+VITE_REVERB_HOST="${REVERB_HOST}"
 
-## Code of Conduct
+VITE_REVERB_PORT="${REVERB_PORT}"
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+VITE_REVERB_SCHEME="${REVERB_SCHEME}"
+```
 
-## Security Vulnerabilities
+```cmd
+php artisan make:controller CommentController
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+php artisan make:model Post
+php artisan make:model Comment
+```
 
-## License
+- Run Reverb Server
+```cmd
+php artisan reverb:start
+```
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+Please refer the Post.php and Comment.php
+
+### CommentController.php
+```php
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Events\CommentPosted;
+use App\Models\Post;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+
+class CommentController extends Controller
+{
+    public function store(Request $request, Post $post)
+    {
+        $validated = $request->validate([
+            'comment' => 'required|string|max:255',
+        ]);
+        $validated['post_id'] = $post->id;
+        $validated['user_id'] = auth()->user()->id;
+
+        $comment = $post->comments()->create($validated);
+
+        broadcast(new CommentPosted($comment))->toOthers();
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Comment posted successfully.',
+            'comment' => $comment->with("user"),
+        ], 200);
+    }
+
+    public function index(Post $post): JsonResponse
+    {
+        $comments = $post->comments()->latest()->with("user")->get();
+
+        return response()->json($comments);
+    }
+}
+```
+### app/Events/CommmentPosted.php
+```php
+<?php
+
+namespace App\Events;
+
+use App\Models\Comment;
+use Illuminate\Broadcasting\InteractsWithSockets;
+use Illuminate\Broadcasting\PrivateChannel;
+use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
+use Illuminate\Foundation\Events\Dispatchable;
+use Illuminate\Queue\SerializesModels;
+
+class CommentPosted implements ShouldBroadcastNow
+{
+
+    use Dispatchable, InteractsWithSockets, SerializesModels;
+
+    public $comment;
+
+    public function __construct(Comment $comment)
+    {
+        $this->comment = $comment;
+    }
+
+    public function broadcastOn(): array
+    {
+        return [
+            new PrivateChannel("posts.{$this->comment->post_id}"),
+        ];
+    }
+
+    public function broadcastAs()
+    {
+        return 'CommentPosted';
+    }
+
+    /**
+
+     * The data to broadcast with the event.
+
+     *
+
+     * @return array
+
+     */
+
+    public function broadcastWith()
+    {
+
+        return [
+
+            'id' => $this->comment->id,
+
+            'user_id' => $this->comment->user_id,
+
+            'post_id' => $this->comment->post_id,
+
+            'comment' => $this->comment->comment,
+
+            'created_at' => $this->comment->created_at,
+
+            'user' => $this->comment->user
+
+        ];
+    }
+}
+```
+### CommentSection.vue
+```vue
+<template>
+    <div>
+        <div
+            v-for="comment in sortedComments"
+            :key="comment.id"
+            class="comment space-y-2"
+        >
+            <div class="mb-2 rounded bg-gray-100">
+                <div class="flex items-center justify-between px-3 py-2">
+                    <p>
+                        {{ comment.user.name }}
+                        <span class="text-sm text-gray-500">{{
+                            comment.user.email
+                        }}</span>
+                    </p>
+                    <span class="text-sm text-gray-500">{{
+                        comment.created_at
+                    }}</span>
+                </div>
+                <p class="border-t px-3 py-2">{{ comment.comment }}</p>
+            </div>
+        </div>
+        <input
+            v-model="newComment"
+            @keyup.enter="postComment"
+            placeholder="Write a comment..."
+        />
+    </div>
+</template>
+
+<script>
+import dayjs from 'dayjs/esm/index.js';
+
+export default {
+    data() {
+        return {
+            comments: [],
+            newComment: '',
+        };
+    },
+    computed: {
+        sortedComments() {
+            return this.comments?.map((t) => ({
+                ...t,
+                created_at: dayjs(t.created_at).format('MMM d YYYY, HH:mm'),
+            }));
+        },
+    },
+    mounted() {
+        console.log('Component mounted.');
+
+        // Listen for new comments
+        window.Echo.private('posts.1').listen('.CommentPosted', (event) => {
+            this.comments.push(event);
+        });
+
+        // Fetch existing comments
+        axios
+            .get('/posts/1/comments')
+            .then((response) => {
+                this.comments = response.data;
+            })
+            .catch((error) => {
+                console.log(error);
+            });
+    },
+    methods: {
+        postComment() {
+            if (this.newComment.trim()) {
+                axios
+                    .post('/posts/1/comments', {
+                        comment: this.newComment,
+                    })
+                    .then(() => {
+                        this.newComment = ''; // Clear input after posting
+                    })
+                    .catch((error) => {
+                        console.log(error);
+                    });
+            }
+        },
+    },
+};
+</script>
+```
+
+### routes/channels.php
+```php
+Broadcast::channel('posts.{id}', function ($user) {
+    return true;
+});
+```
